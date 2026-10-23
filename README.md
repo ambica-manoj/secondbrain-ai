@@ -1,1 +1,1 @@
-# decondbrain-ai
+# secondbrain-ai
