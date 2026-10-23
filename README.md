@@ -1,3 +1,4 @@
+
 # SecondBrain AI
 
 **A local-first, open-source personal knowledge assistant with agentic AI capabilities.**
