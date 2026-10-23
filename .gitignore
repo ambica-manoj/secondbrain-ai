@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Conda and environment variables
+.env
+.env.*
+!.env.example
+
+# Python testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend dependencies
+node_modules/
+frontend/node_modules/
+
+# Frontend build output
+frontend/dist/
+frontend/build/
+
+# Local application data
+data/documents/*
+data/chroma_db/
+data/chroma/
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Model weights and downloaded models
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Local checkpoints and logs
+checkpoints/
+logs/
+*.log
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+
+secondbrain_progress.md
