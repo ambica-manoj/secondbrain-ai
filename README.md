@@ -345,7 +345,7 @@ From the repository root, activate the existing environment or create one:
 conda activate secondbrain
 ```
 
-Install backend dependencies once the project's `requirements.txt` is prepared:
+Install CPU-only PyTorch as described in the document retrieval section below, then install backend dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -448,12 +448,14 @@ Based on the current project notes:
 - [x] Installed Ollama.
 - [x] Successfully run the chosen local model locally.
 - [x] Connect the working local model to FastAPI through `POST /generate`.
-- [ ] Implement PDF and Markdown ingestion.
-- [ ] Add embeddings, persistent ChromaDB indexing, and RAG citations.
+- [x] Implement PDF and Markdown ingestion.
+- [x] Add embeddings and persistent ChromaDB search.
+- [ ] Generate RAG answers with validated citations.
 - [ ] Add SQLite-backed notes and tasks.
 - [ ] Implement the controlled LangGraph agent workflow.
 - [ ] Build the React + Tailwind interface.
-- [ ] Add automated tests and complete setup documentation.
+- [x] Add automated tests for LLM integration and document retrieval.
+- [ ] Complete application setup documentation as later features are implemented.
 
 **Status update (2026-10-23):** Ollama is working locally and is integrated through the FastAPI `POST /generate` endpoint. The endpoint uses the local `qwen2.5:3b` model by default, with environment-variable configuration and explicit errors for connection, timeout, and upstream response failures. The earlier Windows `llama-server`/CUDA initialization error is no longer blocking development; its cause and the specific change that resolved it have not been recorded. See the project's progress tracker for details.
 
@@ -481,3 +483,86 @@ Contributions are welcome. A useful contribution should include:
 ## License
 
 Choose and add an open-source license before publishing the repository. Until a license file is included, do not assume that others have permission to reuse, modify, or redistribute the code.
+
+## Implemented document retrieval (2026-11-23)
+
+The backend now supports PDF/Markdown ingestion and persistent semantic search.
+RAG answer generation, citation validation, notes/tasks, the agent, and the frontend
+remain planned. Search returns evidence passages; it does not generate an answer.
+
+### Install and start
+
+Use Python 3.11 in a virtual environment or the existing Conda environment.
+For the initial 8 GB computer, install CPU-only PyTorch first to avoid unnecessary
+CUDA dependencies:
+
+```bash
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+```
+
+Copy `.env.example` to `.env` if you want to change settings. The application loads
+this file from the repository root; existing shell variables take precedence.
+Start from the repository root with a single worker:
+
+```bash
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/docs` to upload and search documents.
+Ollama is needed only for `/generate`, not for document retrieval.
+
+| Endpoint | Input | Output |
+|---|---|---|
+| `POST /documents` | Multipart `file`: PDF, `.md`, or `.markdown` | Document ID, filename, chunk count, duplicate flag |
+| `POST /search` | JSON `{"query":"What is Python?","top_k":4}` | Ranked passages with document/chunk IDs, filenames, PDF pages, and cosine distances |
+
+The first import/search that needs embeddings downloads
+`sentence-transformers/all-MiniLM-L6-v2` to the Hugging Face cache and requires
+internet access. Later use works offline if the complete model remains cached.
+For an offline run, set `HF_HUB_OFFLINE=1` in your shell after downloading the model.
+Embeddings run on CPU and the model is loaded once per backend process.
+The initial model download may make the first request slow.
+
+Uploads are limited to 10 MiB, PDFs to 500 pages, and extracted documents to 2,000
+chunks. Markdown must use UTF-8. Encrypted, unreadable, and textless PDFs are
+rejected; OCR is not included. Chunks use 180 tokenizer tokens with 30-token overlap
+and preserve page boundaries. Extracted text is whitespace-normalized.
+
+The index stores extracted text and metadata under `data/chroma/`. Original upload
+files are not retained. `SECOND_BRAIN_DATA_DIR` overrides the storage directory;
+relative paths resolve from the repository root. Runtime data is excluded from Git.
+Chroma anonymized telemetry is disabled by the application.
+
+Repeated identical file bytes return the existing document, even under a different
+filename. Changed content creates a new document, including when the filename is
+unchanged. Document replacement/deletion is not implemented yet. Search over an
+empty library returns an empty list without downloading a model. Smaller cosine
+distances indicate closer matches; these are not confidence probabilities, and
+search currently returns nearest passages even for unrelated questions.
+
+A process-local lock serializes retrieval/indexing operations. Run one worker;
+multiple processes writing to the same index are outside the tested configuration.
+`/health` checks only API liveness, not Ollama or embedding-model readiness.
+
+### Tests
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+The retrieval tests use a real temporary persistent Chroma index and deterministic
+small test embeddings. They cover duplicate imports, reopening storage, ranking,
+PDF pages, token overlap, invalid uploads, API errors, and `/generate` compatibility.
+They do not measure MiniLM retrieval quality or local inference performance.
+
+Before describing retrieval quality as validated, import representative documents
+on the target computer and check expected passages for a small question set.
+Validation on 2026-11-23: 28 automated tests passed on Python 3.12/Linux. A separate
+smoke check with the actual MiniLM model imported two Markdown documents and
+retrieved the expected Python passage for a question about lists. Windows/Python
+3.11 installation and performance on the target 8 GB computer remain unverified.
+Direct dependencies are pinned; this is not a complete transitive lockfile.
+
+The next milestone is grounded answers with validated source citations.

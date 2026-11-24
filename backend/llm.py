@@ -1,6 +1,8 @@
 import json
 import os
 import socket
+
+from backend import config  # Load optional .env before reading environment settings.
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 

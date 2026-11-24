@@ -57,3 +57,5 @@ desktop.ini
 
 
 secondbrain_progress.md
+# All local runtime data, including future index files and database sidecars.
+data/

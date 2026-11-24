@@ -1,0 +1,9 @@
+# Python 3.11 recommended. Direct dependencies pinned to the validated environment.
+# Install CPU-only PyTorch first; see README for the platform-specific index.
+fastapi==0.141.1
+uvicorn==0.52.1
+python-multipart==0.0.32
+python-dotenv==1.2.2
+pypdf==6.21.4
+sentence-transformers==5.7.0
+chromadb==1.5.9
