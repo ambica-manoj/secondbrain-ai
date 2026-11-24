@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from backend.config import MAX_UPLOAD_BYTES
 from backend.ingestion import DocumentError
 from backend.rag import RetrievalUnavailable, store
+from backend.qa import answer_question
 
 from backend.llm import (
     OLLAMA_MODEL,
@@ -84,6 +85,39 @@ class SearchHit(BaseModel):
 
 class SearchResponse(BaseModel):
     results: list[SearchHit]
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=4, ge=1, le=10)
+    max_distance: float = Field(default=0.65, ge=0, le=2, allow_inf_nan=False)
+
+
+class AnswerSource(SearchHit):
+    citation_id: int
+
+
+class AskResponse(BaseModel):
+    model: str
+    answer: str
+    sources: list[AnswerSource]
+
+
+@app.post('/ask', response_model=AskResponse)
+def ask_question(request: AskRequest):
+    if not request.question.strip():
+        raise HTTPException(status_code=422, detail='Question must not be blank.')
+    try:
+        result = answer_question(request.question.strip(), store, request.top_k, request.max_distance)
+        return {'model': OLLAMA_MODEL, **result}
+    except RetrievalUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except OllamaTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except OllamaConnectionError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except OllamaResponseError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.post('/documents', response_model=ImportResponse)

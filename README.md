@@ -7,7 +7,7 @@ SecondBrain AI is designed to help people make better use of their own documents
 
 The project is intended to run on the user's own computer and be shared through GitHub. It is not designed to require cloud deployment or a hosted LLM API.
 
-> **Project status:** This README describes the proposed architecture and implementation approach. Some features are still planned; only describe them as complete after they have been implemented and tested.
+> **Project status:** The backend supports local generation, document ingestion, semantic search, and grounded answers through `/ask`. SQLite notes/tasks, LangGraph, and React remain planned. Architecture sections below also describe these future features.
 
 ## Contents
 
@@ -450,7 +450,7 @@ Based on the current project notes:
 - [x] Connect the working local model to FastAPI through `POST /generate`.
 - [x] Implement PDF and Markdown ingestion.
 - [x] Add embeddings and persistent ChromaDB search.
-- [ ] Generate RAG answers with validated citations.
+- [x] Generate RAG answers with validated citation IDs (semantic support still requires evaluation).
 - [ ] Add SQLite-backed notes and tasks.
 - [ ] Implement the controlled LangGraph agent workflow.
 - [ ] Build the React + Tailwind interface.
@@ -487,8 +487,8 @@ Choose and add an open-source license before publishing the repository. Until a 
 ## Implemented document retrieval (2026-11-23)
 
 The backend now supports PDF/Markdown ingestion and persistent semantic search.
-RAG answer generation, citation validation, notes/tasks, the agent, and the frontend
-remain planned. Search returns evidence passages; it does not generate an answer.
+Search returns evidence passages; `/ask` now connects those passages to Ollama.
+Notes/tasks, the agent, and the frontend remain planned.
 
 ### Install and start
 
@@ -510,7 +510,7 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Open `http://127.0.0.1:8000/docs` to upload and search documents.
-Ollama is needed only for `/generate`, not for document retrieval.
+Ollama is needed for `/generate` and `/ask` answer generation, not for document retrieval.
 
 | Endpoint | Input | Output |
 |---|---|---|
@@ -565,4 +565,51 @@ retrieved the expected Python passage for a question about lists. Windows/Python
 3.11 installation and performance on the target 8 GB computer remain unverified.
 Direct dependencies are pinned; this is not a complete transitive lockfile.
 
-The next milestone is grounded answers with validated source citations.
+The next milestone is SQLite persistence for notes and tasks.
+
+
+## Grounded answers (`POST /ask`)
+
+After importing a document through `/documents`, call `/ask` from Swagger at
+`http://127.0.0.1:8000/docs` with:
+
+```json
+{"question": "What do my notes say about overfitting?", "top_k": 4, "max_distance": 0.65}
+```
+
+The response includes `model`, `answer`, and `sources`. Answer references such as
+`[1]` map to each source's `citation_id`; sources also contain the stored filename,
+PDF page number (null for Markdown), document/chunk IDs, distance, and the exact
+passage supplied to the model. Only cited passages are returned, so citation IDs
+may have gaps.
+
+The service retrieves up to 10 passages (default 4), excludes passages above the
+cosine-distance cutoff, and limits evidence to 6,000 characters total and 1,800
+characters per passage. Lower distance is closer; the default cutoff of 0.65 is a
+starting heuristic, not a calibrated confidence score. Tune it with representative
+MiniLM queries. Empty or filtered-out results return an insufficient-information
+answer and no sources without calling Ollama. The model can also abstain when
+retrieved passages do not answer the question.
+
+Ollama is asked for JSON output with a 4,096-token context, up to 512 generated
+tokens, and temperature zero. Evidence and questions are encoded as JSON and the
+prompt instructs the model to treat their content as data, not instructions.
+Character limits bound prompt size but are not exact Qwen token counts; unusual
+text may still exceed the model context. Prompt instructions reduce injection
+risk but cannot guarantee grounding.
+
+The backend rejects malformed/empty answers, answers without numbered citations,
+and references to unknown evidence IDs with HTTP 502. Citation metadata always
+comes from retrieval, never from the model. **ID validation does not prove that a
+passage supports every claim**; inspect answers and sources with the actual local
+model. Index/connection failures return 503 and generation timeouts return 504.
+`/generate` retains its existing free-form behavior.
+
+`tests/test_qa.py` covers grounding, abstention, relevance filtering, context limits,
+source mapping, malformed citations/output, input validation, Ollama request
+options, and API error mapping without downloading a model or running Ollama.
+These tests do not evaluate Qwen answer quality or target-machine performance.
+
+Validation on 2026-11-24: 56 automated tests passed on Python 3.12/Linux,
+including upload → persistent Chroma retrieval → `/ask` with mocked generation.
+Live Ollama/Qwen inference and target-machine performance were not tested.

@@ -1,4 +1,4 @@
-"""Persistent semantic retrieval. Answer generation is a later milestone."""
+"""Persistent semantic retrieval; grounded answer generation lives in qa.py."""
 import hashlib
 import os
 from pathlib import Path

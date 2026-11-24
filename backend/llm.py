@@ -28,15 +28,16 @@ class OllamaResponseError(OllamaError):
     """Ollama returned an unsuccessful or invalid response."""
 
 
-def generate_response(prompt: str) -> str:
+def generate_response(prompt: str, *, grounded: bool = False) -> str:
     """Generate a response from the configured local Ollama model."""
-    payload = json.dumps(
-        {
+    body = {
             "model": OLLAMA_MODEL,
             "prompt": prompt,
             "stream": False,
         }
-    ).encode("utf-8")
+    if grounded:
+        body.update(format='json', options={'num_ctx': 4096, 'num_predict': 512, 'temperature': 0})
+    payload = json.dumps(body).encode("utf-8")
     request = Request(
         f"{OLLAMA_URL}/api/generate",
         data=payload,
