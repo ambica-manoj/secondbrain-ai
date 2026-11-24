@@ -7,7 +7,7 @@ SecondBrain AI is designed to help people make better use of their own documents
 
 The project is intended to run on the user's own computer and be shared through GitHub. It is not designed to require cloud deployment or a hosted LLM API.
 
-> **Project status:** The backend supports local generation, document ingestion, semantic search, and grounded answers through `/ask`. SQLite notes/tasks, LangGraph, and React remain planned. Architecture sections below also describe these future features.
+> **Project status:** The backend supports local generation, document ingestion, semantic search, grounded answers through `/ask`, and SQLite notes/tasks. LangGraph and React remain planned. Architecture sections below also describe these future features.
 
 ## Contents
 
@@ -451,7 +451,7 @@ Based on the current project notes:
 - [x] Implement PDF and Markdown ingestion.
 - [x] Add embeddings and persistent ChromaDB search.
 - [x] Generate RAG answers with validated citation IDs (semantic support still requires evaluation).
-- [ ] Add SQLite-backed notes and tasks.
+- [x] Add SQLite-backed notes and tasks.
 - [ ] Implement the controlled LangGraph agent workflow.
 - [ ] Build the React + Tailwind interface.
 - [x] Add automated tests for LLM integration and document retrieval.
@@ -488,7 +488,7 @@ Choose and add an open-source license before publishing the repository. Until a 
 
 The backend now supports PDF/Markdown ingestion and persistent semantic search.
 Search returns evidence passages; `/ask` now connects those passages to Ollama.
-Notes/tasks, the agent, and the frontend remain planned.
+SQLite notes/tasks are also implemented; the agent and frontend remain planned.
 
 ### Install and start
 
@@ -565,7 +565,8 @@ retrieved the expected Python passage for a question about lists. Windows/Python
 3.11 installation and performance on the target 8 GB computer remain unverified.
 Direct dependencies are pinned; this is not a complete transitive lockfile.
 
-The next milestone is SQLite persistence for notes and tasks.
+The next milestone is the controlled LangGraph workflow, using document search and
+the SQLite notes/tasks repository as its tools.
 
 
 ## Grounded answers (`POST /ask`)
@@ -613,3 +614,64 @@ These tests do not evaluate Qwen answer quality or target-machine performance.
 Validation on 2026-11-24: 56 automated tests passed on Python 3.12/Linux,
 including upload → persistent Chroma retrieval → `/ask` with mocked generation.
 Live Ollama/Qwen inference and target-machine performance were not tested.
+
+## Persistent notes and tasks
+
+Notes and tasks are stored in `data/secondbrain.sqlite3`, or beneath
+`SECOND_BRAIN_DATA_DIR` when configured. Tables initialize automatically at API
+startup. No additional package, model, or database server is needed. Records stay
+available after restarting the backend and are excluded from Git with runtime data.
+An inaccessible database prevents startup; runtime storage failures return HTTP 503.
+
+| Endpoint | Behavior |
+|---|---|
+| `POST /notes` | Create with `title` and `content`; returns 201 and the saved record |
+| `GET /notes` | List newest first, with `limit` (1–100, default 50) and `offset` |
+| `GET /notes/{id}` | Read a saved note |
+| `PUT /notes/{id}` | Replace its `title` and `content` |
+| `DELETE /notes/{id}?confirm=true` | Delete a note after explicit confirmation |
+| `POST /tasks` | Create with `title` and optional `description`; status starts as `pending` |
+| `GET /tasks` | List with pagination and optional `status` filter |
+| `GET /tasks/{id}` | Read a saved task |
+| `PUT /tasks/{id}` | Replace `title`, `description` (defaults to empty), and required `status` |
+| `DELETE /tasks/{id}?confirm=true` | Delete a task after explicit confirmation |
+
+Task status is one of `pending`, `in_progress`, or `completed`. PUT replaces editable
+fields; it is not a partial update. Titles are trimmed and must contain 1–200
+characters; note content is trimmed and must contain 1–20,000 characters. Optional
+task descriptions allow up to 20,000 characters. Unknown input fields are rejected.
+Records include UUID `id`, UTC `created_at`, and UTC `updated_at` fields. Updates
+preserve creation time. Missing records return 404, invalid input returns 422, and
+deletion without `confirm=true` returns 409 without changing storage. A future UI
+or agent must obtain the user's confirmation before setting this flag.
+
+### Try it in Swagger
+
+Start the backend as above and open `http://127.0.0.1:8000/docs`.
+
+1. Call `POST /notes` with:
+   ```json
+   {"title": "Overfitting revision", "content": "Review validation and regularization."}
+   ```
+2. Call `POST /tasks` with:
+   ```json
+   {"title": "Revise overfitting", "description": "Read my notes and practice two questions."}
+   ```
+3. Copy the returned task ID. Call `PUT /tasks/{id}` with:
+   ```json
+   {"title": "Revise overfitting", "description": "Read my notes and practice two questions.", "status": "completed"}
+   ```
+4. Call `GET /tasks?status=completed` and confirm the task appears.
+5. Restart the backend and call `GET /notes` and `GET /tasks` to check persistence.
+6. To remove a test record, call its DELETE endpoint with `confirm=true`.
+
+`tests/test_records.py` exercises the record lifecycle, reopening a database,
+parameterized SQL with literal special characters, timestamps, pagination/status
+filters, input validation, missing records, deletion confirmation, and storage errors.
+This milestone supplies persistent actions for the future agent; it does not yet
+interpret natural-language requests or automatically save generated plans.
+
+Validation on 2026-11-24: all 76 automated tests passed on Python 3.12/Linux,
+including 20 notes/tasks tests and the existing retrieval/grounded-answer suite.
+SQLite uses temporary real databases in the new tests. Live Ollama inference and
+Windows/target-machine performance were not tested for this milestone.
