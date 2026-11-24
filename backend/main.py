@@ -1,10 +1,15 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.config import MAX_UPLOAD_BYTES
 from backend.ingestion import DocumentError
 from backend.rag import RetrievalUnavailable, store
 from backend.qa import answer_question
+from backend.database import DatabaseUnavailable, RecordNotFound, get_database
+from backend.records import router as records_router
 
 from backend.llm import (
     OLLAMA_MODEL,
@@ -14,11 +19,29 @@ from backend.llm import (
     generate_response,
 )
 
+@asynccontextmanager
+async def lifespan(app):
+    get_database().initialize()
+    yield
+
+
 app = FastAPI(
     title="SecondBrain AI",
     description="A local-first personal knowledge assistant",
     version="0.1.0",
+    lifespan=lifespan,
 )
+app.include_router(records_router)
+
+
+@app.exception_handler(DatabaseUnavailable)
+async def database_error(request, error):
+    return JSONResponse(status_code=503, content={'detail': str(error)})
+
+
+@app.exception_handler(RecordNotFound)
+async def record_not_found(request, error):
+    return JSONResponse(status_code=404, content={'detail': str(error)})
 
 
 class GenerateRequest(BaseModel):
