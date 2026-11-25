@@ -7,7 +7,7 @@ SecondBrain AI is designed to help people make better use of their own documents
 
 The project is intended to run on the user's own computer and be shared through GitHub. It is not designed to require cloud deployment or a hosted LLM API.
 
-> **Project status:** The backend supports local generation, document ingestion, semantic search, grounded answers through `/ask`, and SQLite notes/tasks. LangGraph and React remain planned. Architecture sections below also describe these future features.
+> **Project status:** The backend supports local generation, document ingestion, semantic search, grounded answers through `/ask`, and SQLite notes/tasks. A bounded LangGraph study-planning workflow is implemented; React remains planned. Architecture sections below also describe these future features.
 
 ## Contents
 
@@ -452,7 +452,7 @@ Based on the current project notes:
 - [x] Add embeddings and persistent ChromaDB search.
 - [x] Generate RAG answers with validated citation IDs (semantic support still requires evaluation).
 - [x] Add SQLite-backed notes and tasks.
-- [ ] Implement the controlled LangGraph agent workflow.
+- [x] Implement the bounded LangGraph study-planning workflow (live model evaluation pending).
 - [ ] Build the React + Tailwind interface.
 - [x] Add automated tests for LLM integration and document retrieval.
 - [ ] Complete application setup documentation as later features are implemented.
@@ -488,7 +488,7 @@ Choose and add an open-source license before publishing the repository. Until a 
 
 The backend now supports PDF/Markdown ingestion and persistent semantic search.
 Search returns evidence passages; `/ask` now connects those passages to Ollama.
-SQLite notes/tasks are also implemented; the agent and frontend remain planned.
+SQLite notes/tasks are also implemented; the React frontend remains planned.
 
 ### Install and start
 
@@ -565,8 +565,7 @@ retrieved the expected Python passage for a question about lists. Windows/Python
 3.11 installation and performance on the target 8 GB computer remain unverified.
 Direct dependencies are pinned; this is not a complete transitive lockfile.
 
-The next milestone is the controlled LangGraph workflow, using document search and
-the SQLite notes/tasks repository as its tools.
+The LangGraph study-planning workflow now uses document search and SQLite tasks; see below.
 
 
 ## Grounded answers (`POST /ask`)
@@ -675,3 +674,45 @@ Validation on 2026-11-24: all 76 automated tests passed on Python 3.12/Linux,
 including 20 notes/tasks tests and the existing retrieval/grounded-answer suite.
 SQLite uses temporary real databases in the new tests. Live Ollama inference and
 Windows/target-machine performance were not tested for this milestone.
+
+
+
+## Study-planning workflow (`/agent/plans`)
+
+Install the updated requirements and restart the backend. In Swagger:
+
+1. Import relevant notes using `POST /documents`.
+2. Call `POST /agent/plans` with:
+   ```json
+   {"request": "Use my overfitting notes to create a three-session revision plan."}
+   ```
+3. Review the returned `title`, `tasks`, `source_ids`, and `sources`. No tasks are
+   saved yet. The preview itself persists in SQLite; retrieve it with
+   `GET /agent/plans/{id}` after restarting.
+4. To save exactly this proposal, call `POST /agent/plans/{id}/approve` with:
+   ```json
+   {"confirm": true}
+   ```
+5. Inspect the returned saved task records or call `GET /tasks`.
+
+LangGraph runs a bounded workflow: the model selects an allowlisted search tool
+and focused query, retrieval supplies up to four filtered passages, and the model
+produces up to five validated tasks. Empty retrieval or model abstention returns
+`insufficient_evidence` without a preview ID. This is a constrained study planner,
+not a general-purpose autonomous agent. Ordinary questions still use `/ask`.
+There are at most two model calls and no automatic retries, deletion, shell tools,
+or automatic writes requested by model output. Citation IDs are checked against
+retrieved evidence; semantic support and study-plan usefulness require review.
+
+Approval operates only on the stored preview, never replacement tasks from the
+client. All task inserts and their plan association commit in one SQLite
+transaction, then saved records are returned. Concurrent/repeated approvals return
+the same task IDs without duplicates, including after restart. If a saved task was
+subsequently deleted, approval returns 404 and does not recreate it. Model failures
+return 502, unavailable retrieval/Ollama returns 503, and model timeouts return 504.
+The preview endpoint returns 201, including when its body reports insufficient evidence.
+
+The API is intended for a trusted local single-user process. A future UI must show
+the proposal and obtain explicit approval before sending `confirm: true`.
+Initial planning uses the same local Ollama model and JSON generation settings as
+`/ask`; evaluate output validity and context limits on the target machine.
