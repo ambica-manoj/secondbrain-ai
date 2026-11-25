@@ -28,7 +28,7 @@ class OllamaResponseError(OllamaError):
     """Ollama returned an unsuccessful or invalid response."""
 
 
-def generate_response(prompt: str, *, grounded: bool = False) -> str:
+def generate_response(prompt: str, *, grounded: bool = False, output_schema: dict | None = None) -> str:
     """Generate a response from the configured local Ollama model."""
     body = {
             "model": OLLAMA_MODEL,
@@ -37,6 +37,11 @@ def generate_response(prompt: str, *, grounded: bool = False) -> str:
         }
     if grounded:
         body.update(format='json', options={'num_ctx': 4096, 'num_predict': 512, 'temperature': 0})
+    if output_schema is not None:
+        # Constrain generation at the Ollama runtime, not only in prompt prose.
+        body.update(format=output_schema, options={
+            'num_ctx': 4096, 'num_predict': 1536, 'temperature': 0,
+        })
     payload = json.dumps(body).encode("utf-8")
     request = Request(
         f"{OLLAMA_URL}/api/generate",

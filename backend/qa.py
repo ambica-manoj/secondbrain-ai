@@ -39,7 +39,30 @@ def answer_question(question, document_store, top_k=4, max_distance=0.65):
         + '\nInput JSON:\n'
         + json.dumps({'question': question, 'evidence': evidence}, ensure_ascii=False)
     )
-    raw = generate_response(prompt, grounded=True)
+    output_schema = {
+        'type': 'object',
+        'properties': {'answer': {'type': 'string', 'minLength': 1}},
+        'required': ['answer'], 'additionalProperties': False,
+    }
+    # One bounded regeneration; never manufacture citations on the server.
+    for attempt in range(2):
+        raw = generate_response(prompt, grounded=True, output_schema=output_schema)
+        try:
+            return validate_answer(raw, sources)
+        except OllamaResponseError:
+            if attempt == 1:
+                raise
+            prompt += (
+                '\nYour previous response failed validation. Regenerate from the original evidence. '
+                'Return JSON with only the answer field. Every factual claim must cite a supporting '
+                'evidence ID using exactly [1], [2], etc. Only use IDs present in Input JSON. '
+                'Do not invent evidence or add a citation merely to pass validation. '
+                'If no supported answer is possible, return the exact insufficient-information '
+                'answer specified above. Keep the answer concise.'
+            )
+
+
+def validate_answer(raw, sources):
     try:
         result = json.loads(raw)
     except (ValueError, TypeError) as error:
@@ -55,5 +78,8 @@ def answer_question(question, document_store, top_k=4, max_distance=0.65):
     cited = set(re.findall(r'\[([0-9]+)\]', answer))
     allowed = {str(source['citation_id']) for source in sources}
     if not cited or not cited.issubset(allowed):
-        raise OllamaResponseError('The model returned missing or unknown source citations. Please try again.')
+        raise OllamaResponseError(
+            'The model returned missing or unknown source citations after one retry. '
+            'Try a narrower question. No unverified answer was returned.'
+        )
     return {'answer': answer, 'sources': [s for s in sources if str(s['citation_id']) in cited]}

@@ -1,4 +1,5 @@
 """Small SQLite repository; connections are owned and closed by each operation."""
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -49,6 +50,55 @@ class Database:
                     CHECK(status IN ('pending', 'in_progress', 'completed')),
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             )''')
+
+            connection.execute("""CREATE TABLE IF NOT EXISTS agent_plans (
+                id TEXT PRIMARY KEY, payload TEXT NOT NULL, task_ids TEXT,
+                created_at TEXT NOT NULL
+            )""")
+
+    def create_plan(self, payload):
+        plan_id = str(uuid4())
+        with self._connection() as connection:
+            connection.execute('INSERT INTO agent_plans VALUES (?, ?, NULL, ?)',
+                               (plan_id, json.dumps(payload), datetime.now(timezone.utc).isoformat()))
+        return self.get_plan(plan_id)
+
+    def get_plan(self, plan_id):
+        with self._connection() as connection:
+            row = connection.execute('SELECT * FROM agent_plans WHERE id = ?', (plan_id,)).fetchone()
+            if row is None:
+                raise RecordNotFound('Plan not found.')
+            return {'id': row['id'], **json.loads(row['payload']),
+                    'status': 'saved' if row['task_ids'] is not None else 'preview',
+                    'task_ids': json.loads(row['task_ids']) if row['task_ids'] is not None else []}
+
+    def approve_plan(self, plan_id):
+        with self._connection() as connection:
+            # Serialize approvals across connections/processes; commit all tasks or none.
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT * FROM agent_plans WHERE id = ?', (plan_id,)).fetchone()
+            if row is None:
+                raise RecordNotFound('Plan not found.')
+            if row['task_ids'] is not None:
+                ids = json.loads(row['task_ids'])
+            else:
+                ids = []
+                payload = json.loads(row['payload'])
+                now = datetime.now(timezone.utc).isoformat()
+                for task in payload['tasks']:
+                    task_id = str(uuid4())
+                    connection.execute('INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)',
+                                       (task_id, task['title'], task['description'], 'pending', now, now))
+                    ids.append(task_id)
+                connection.execute('UPDATE agent_plans SET task_ids = ? WHERE id = ?',
+                                   (json.dumps(ids), plan_id))
+            records = []
+            for task_id in ids:
+                task = connection.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+                if task is None:
+                    raise RecordNotFound('A previously saved task was deleted; this plan will not recreate it.')
+                records.append(dict(task))
+            return {'plan_id': plan_id, 'status': 'saved', 'tasks': records}
 
     @staticmethod
     def _table(kind):

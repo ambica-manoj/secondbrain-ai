@@ -10,6 +10,7 @@ from backend.rag import RetrievalUnavailable, store
 from backend.qa import answer_question
 from backend.database import DatabaseUnavailable, RecordNotFound, get_database
 from backend.records import router as records_router
+from backend.agent_routes import router as agent_router
 
 from backend.llm import (
     OLLAMA_MODEL,
@@ -32,6 +33,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(records_router)
+app.include_router(agent_router)
 
 
 @app.exception_handler(DatabaseUnavailable)
@@ -63,7 +65,7 @@ def home():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "generation_contract": "structured-v2"}
 
 
 @app.post("/generate", response_model=GenerateResponse)
